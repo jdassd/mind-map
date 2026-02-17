@@ -51,7 +51,7 @@ async def accept_invitation(
         raise HTTPException(status_code=403, detail="Not your invitation")
     if inv.status != "pending":
         raise HTTPException(status_code=400, detail="Invitation already processed")
-    if inv.expires_at < datetime.now(timezone.utc):
+    if inv.expires_at < datetime.utcnow():
         inv.status = "expired"
         await db.commit()
         raise HTTPException(status_code=400, detail="Invitation expired")
