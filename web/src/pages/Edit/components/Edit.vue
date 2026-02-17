@@ -107,8 +107,7 @@ import RichTextToolbar from './RichTextToolbar.vue'
 import NodeNoteContentShow from './NodeNoteContentShow.vue'
 import { getData, getConfig, storeData } from '@/api'
 import { getCurrentMindMapId } from '@/api'
-import { getNodeHistory, saveNodeHistory } from '@/api/mindmaps'
-import MindMapWS from '@/api/ws'
+import { getNodeHistory, saveNodeHistory, getNodeLocks, lockNode, unlockNode, refreshNodeLock } from '@/api/mindmaps'
 import Navigator from './Navigator.vue'
 import NodeImgPreview from './NodeImgPreview.vue'
 import SidebarTrigger from './SidebarTrigger.vue'
@@ -204,13 +203,14 @@ export default {
       storeConfigTimer: null,
       showDragMask: false,
       // 节点锁定相关
-      wsClient: null,
-      lockedNodes: {},       // { nodeUid: { user_id, display_name } }
-      editingNodeUid: null,  // 当前正在编辑的节点uid
-      lockLabelElements: {}, // SVG lock label elements
+      lockedNodes: {},         // { nodeUid: { user_id, display_name } }
+      editingNodeUid: null,    // 当前正在编辑的节点uid
+      lockLabelElements: {},   // SVG lock label elements
+      lockPollTimer: null,     // 轮询锁定状态定时器
+      lockRefreshTimer: null,  // 刷新自己锁定的TTL定时器
       // 编辑历史
-      nodeHistoryMap: {},     // { nodeUid: historyRecord }
-      activeNodeHistory: null // 当前选中节点的编辑历史
+      nodeHistoryMap: {},      // { nodeUid: historyRecord }
+      activeNodeHistory: null  // 当前选中节点的编辑历史
     }
   },
   computed: {
@@ -260,7 +260,7 @@ export default {
     window.addEventListener('resize', this.handleResize)
     this.$bus.$on('showDownloadTip', this.showDownloadTip)
     // 节点锁定和编辑历史
-    this.initWebSocket()
+    this.initLockPolling()
     this.loadNodeHistory()
     this.$bus.$on('node_active', this.handleNodeActive)
   },
@@ -279,11 +279,9 @@ export default {
     window.removeEventListener('resize', this.handleResize)
     this.$bus.$off('showDownloadTip', this.showDownloadTip)
     this.$bus.$off('node_active', this.handleNodeActive)
-    // 清理WebSocket和锁定标签
-    if (this.wsClient) {
-      this.wsClient.close()
-      this.wsClient = null
-    }
+    // 清理轮询定时器和锁定标签
+    this.stopLockPolling()
+    this.releaseCurrentLock()
     this.clearAllLockLabels()
     this.mindMap.destroy()
   },
@@ -657,49 +655,74 @@ export default {
 
     // ============ 节点锁定与编辑历史 ============
 
-    // 初始化WebSocket连接
-    initWebSocket() {
+    // 初始化锁定状态轮询
+    initLockPolling() {
       const mindmapId = getCurrentMindMapId()
       if (!mindmapId || window.takeOverApp) return
+      this.pollLocks()
+      this.lockPollTimer = setInterval(() => {
+        this.pollLocks()
+      }, 3000)
+    },
 
-      this.wsClient = new MindMapWS(mindmapId)
+    // 停止轮询
+    stopLockPolling() {
+      if (this.lockPollTimer) {
+        clearInterval(this.lockPollTimer)
+        this.lockPollTimer = null
+      }
+      if (this.lockRefreshTimer) {
+        clearInterval(this.lockRefreshTimer)
+        this.lockRefreshTimer = null
+      }
+    },
 
-      this.wsClient.onLockStateSync = (locks) => {
-        this.lockedNodes = { ...locks }
+    // 轮询获取锁定状态
+    async pollLocks() {
+      const mindmapId = getCurrentMindMapId()
+      if (!mindmapId) return
+      try {
+        const { data } = await getNodeLocks(mindmapId)
+        const newLocks = {}
+        data.forEach(lock => {
+          newLocks[lock.node_uid] = {
+            user_id: lock.user_id,
+            display_name: lock.display_name
+          }
+        })
+        this.lockedNodes = newLocks
         this.updateAllLockLabels()
+      } catch (e) {
+        // ignore polling errors
       }
+    },
 
-      this.wsClient.onNodeLocked = (nodeUid, lockedBy) => {
-        this.$set(this.lockedNodes, nodeUid, lockedBy)
-        this.updateLockLabel(nodeUid, lockedBy)
+    // 释放当前持有的锁
+    releaseCurrentLock() {
+      if (this.editingNodeUid) {
+        const mindmapId = getCurrentMindMapId()
+        if (mindmapId) {
+          unlockNode(mindmapId, this.editingNodeUid).catch(() => {})
+        }
+        this.editingNodeUid = null
       }
-
-      this.wsClient.onNodeUnlocked = (nodeUid) => {
-        this.$delete(this.lockedNodes, nodeUid)
-        this.removeLockLabel(nodeUid)
+      if (this.lockRefreshTimer) {
+        clearInterval(this.lockRefreshTimer)
+        this.lockRefreshTimer = null
       }
-
-      this.wsClient.onLockSuccess = (nodeUid) => {
-        this.editingNodeUid = nodeUid
-        // 锁定成功，允许编辑 - 触发编辑
-        this.mindMap.renderer.startTextEdit()
-      }
-
-      this.wsClient.onLockFailed = (nodeUid, lockedBy) => {
-        this.$message.warning(`${lockedBy.display_name} 正在编辑此节点`)
-      }
-
-      this.wsClient.connect()
     },
 
     // 检查节点锁定状态（beforeTextEdit 回调）
     checkNodeLockBeforeEdit(node) {
-      if (!this.wsClient || !node) return true
+      if (!node) return true
 
-      const nodeUid = node.uid || (node.nodeData && node.nodeData.data && node.nodeData.data.uid) || node.getData('uid')
+      const mindmapId = getCurrentMindMapId()
+      if (!mindmapId) return true
+
+      const nodeUid = node.uid || (node.nodeData && node.nodeData.data && node.nodeData.data.uid) || (node.getData && node.getData('uid'))
       if (!nodeUid) return true // 没有uid的节点不做锁定
 
-      // 检查是否被他人锁定
+      // 检查是否被他人锁定（基于最近一次轮询的缓存）
       const lockInfo = this.lockedNodes[nodeUid]
       const currentUser = this.$store.state.auth.user
       if (lockInfo && currentUser && lockInfo.user_id !== currentUser.id) {
@@ -707,33 +730,55 @@ export default {
         return false
       }
 
-      // 请求锁定
-      this.wsClient.lockNode(nodeUid)
-      // 返回 false 先阻止编辑，等 onLockSuccess 回调后再启动编辑
+      // 发起锁定请求（异步），先阻止编辑
+      lockNode(mindmapId, nodeUid).then(({ data }) => {
+        if (data.success) {
+          this.editingNodeUid = nodeUid
+          // 启动TTL刷新定时器（每30秒刷新一次）
+          this.lockRefreshTimer = setInterval(() => {
+            if (this.editingNodeUid) {
+              refreshNodeLock(mindmapId, this.editingNodeUid).catch(() => {})
+            }
+          }, 30000)
+          // 锁定成功，触发编辑
+          this.mindMap.renderer.startTextEdit()
+        } else if (data.locked_by) {
+          this.$message.warning(`${data.locked_by.display_name} 正在编辑此节点`)
+        }
+      }).catch(() => {
+        this.$message.error('锁定节点失败')
+      })
       return false
     },
 
     // 编辑结束时解锁节点并保存历史
     handleEndTextEdit() {
       this.mindMap.renderer.endTextEdit()
-      if (this.editingNodeUid && this.wsClient) {
-        this.wsClient.unlockNode(this.editingNodeUid)
+      if (this.editingNodeUid) {
+        const mindmapId = getCurrentMindMapId()
+        const editedNodeUid = this.editingNodeUid
+        // 停止TTL刷新
+        if (this.lockRefreshTimer) {
+          clearInterval(this.lockRefreshTimer)
+          this.lockRefreshTimer = null
+        }
+        // 解锁
+        if (mindmapId) {
+          unlockNode(mindmapId, editedNodeUid).catch(() => {})
+        }
+        this.editingNodeUid = null
         // 保存编辑历史
         const currentUser = this.$store.state.auth.user
-        const mindmapId = getCurrentMindMapId()
         if (currentUser && mindmapId) {
           saveNodeHistory(mindmapId, {
-            node_uid: this.editingNodeUid,
+            node_uid: editedNodeUid,
             user_display_name: currentUser.display_name
           }).then(({ data }) => {
-            this.$set(this.nodeHistoryMap, this.editingNodeUid, data)
-            this.editingNodeUid = null
-          }).catch(() => {
-            this.editingNodeUid = null
-          })
-        } else {
-          this.editingNodeUid = null
+            this.$set(this.nodeHistoryMap, editedNodeUid, data)
+          }).catch(() => {})
         }
+        // 立即刷新锁定状态
+        this.pollLocks()
       }
     },
 

@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.database import create_tables
+from app.redis import close_redis
 from app.routers import auth, mindmaps, teams, invitations
-from app.routers import ws as ws_router
+from app.routers import node_locks
 
 # Pydantic 验证错误 → 用户友好提示的映射
 VALIDATION_FIELD_NAMES = {
@@ -32,6 +33,7 @@ VALIDATION_TYPE_MESSAGES = {
 async def lifespan(app: FastAPI):
     await create_tables()
     yield
+    await close_redis()
 
 
 app = FastAPI(title="Mind Map API", version="1.0.0", lifespan=lifespan)
@@ -66,7 +68,7 @@ app.include_router(auth.router)
 app.include_router(mindmaps.router)
 app.include_router(teams.router)
 app.include_router(invitations.router)
-app.include_router(ws_router.router)
+app.include_router(node_locks.router)
 
 
 @app.get("/api/health")

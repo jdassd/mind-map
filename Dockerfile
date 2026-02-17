@@ -12,7 +12,7 @@ RUN cd web && npm run build
 FROM python:3.11-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nginx supervisor && \
+    apt-get install -y --no-install-recommends nginx supervisor redis-server && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy frontend build output
@@ -28,9 +28,10 @@ COPY server/app /app/server/app
 # Copy config files
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY redis.conf /etc/redis/redis.conf
 
-# Create data directory
-RUN mkdir -p /app/data
+# Create data directories
+RUN mkdir -p /app/data /app/data/redis
 
 WORKDIR /app/server
 

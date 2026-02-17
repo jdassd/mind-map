@@ -27,3 +27,19 @@ export function getNodeHistory(mindmapId) {
 export function saveNodeHistory(mindmapId, data) {
   return http.post(`/mindmaps/${mindmapId}/node-history`, data)
 }
+
+export function getNodeLocks(mindmapId) {
+  return http.get(`/mindmaps/${mindmapId}/locks`)
+}
+
+export function lockNode(mindmapId, nodeUid) {
+  return http.post(`/mindmaps/${mindmapId}/locks`, { node_uid: nodeUid })
+}
+
+export function unlockNode(mindmapId, nodeUid) {
+  return http.delete(`/mindmaps/${mindmapId}/locks/${nodeUid}`)
+}
+
+export function refreshNodeLock(mindmapId, nodeUid) {
+  return http.post(`/mindmaps/${mindmapId}/locks/${nodeUid}/refresh`)
+}
