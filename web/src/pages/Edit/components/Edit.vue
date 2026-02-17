@@ -213,7 +213,8 @@ export default {
       nodeHistoryMap: {},      // { nodeUid: historyRecord }
       activeNodeHistory: null, // 当前选中节点的编辑历史
       // 数据同步
-      lastSyncedAt: null       // 上次同步时的 updated_at
+      lastSyncedAt: null,      // 上次同步时的 updated_at
+      _isSyncing: false        // 正在从服务端同步数据，阻止触发保存
     }
   },
   computed: {
@@ -341,6 +342,8 @@ export default {
     // 存储数据当数据有变时
     bindSaveEvent() {
       this.$bus.$on('data_change', data => {
+        // 从服务端同步数据时不触发保存，避免无限循环
+        if (this._isSyncing) return
         storeData({ root: data })
       })
       this.$bus.$on('view_data_change', data => {
@@ -667,7 +670,7 @@ export default {
       this.pollLocks()
       this.lockPollTimer = setInterval(() => {
         this.pollLocks()
-      }, 3000)
+      }, 2000)
     },
 
     // 停止轮询
@@ -722,11 +725,13 @@ export default {
         if (mapData && mapData.data) {
           const fullData = mapData.data
           if (fullData.root) {
+            this._isSyncing = true
             this.mindMap.setFullData(fullData)
+            this._isSyncing = false
           }
         }
       } catch (e) {
-        // ignore sync errors
+        this._isSyncing = false
       }
     },
 
