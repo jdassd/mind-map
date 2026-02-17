@@ -278,6 +278,7 @@ export default {
   /deep/ .el-input__inner {
     height: 44px;
     line-height: 44px;
+    padding-left: 40px;
     border-radius: 10px;
     border: 1px solid #e5e7eb;
     background: #fff;
