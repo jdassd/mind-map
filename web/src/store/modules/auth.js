@@ -7,6 +7,9 @@ const auth = {
     isLoggedIn: !!localStorage.getItem('access_token')
   },
   mutations: {
+    SET_LOGGED_IN(state) {
+      state.isLoggedIn = true
+    },
     SET_USER(state, user) {
       state.user = user
       state.isLoggedIn = !!user
@@ -21,7 +24,7 @@ const auth = {
       const { data } = await loginApi(credentials)
       localStorage.setItem('access_token', data.access_token)
       localStorage.setItem('refresh_token', data.refresh_token)
-      commit('SET_USER', null) // will be fetched by fetchUser
+      commit('SET_LOGGED_IN') // mark as logged in, user will be fetched by fetchUser
       return data
     },
     async register(_, userData) {
