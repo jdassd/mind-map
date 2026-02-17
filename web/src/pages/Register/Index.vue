@@ -66,7 +66,7 @@ export default {
         this.$message.success(this.$t('auth.registerSuccess'))
         this.$router.push('/login')
       } catch (err) {
-        const msg = err.response && err.response.data && err.response.data.detail
+        const msg = err._friendlyMessage || (err.response && err.response.data && err.response.data.detail)
         this.$message.error(msg || this.$t('auth.registerFailed'))
       } finally {
         this.loading = false

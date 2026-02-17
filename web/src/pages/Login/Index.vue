@@ -47,7 +47,7 @@ export default {
         await this.$store.dispatch('auth/fetchUser')
         this.$router.push('/')
       } catch (err) {
-        const msg = err.response && err.response.data && err.response.data.detail
+        const msg = err._friendlyMessage || (err.response && err.response.data && err.response.data.detail)
         this.$message.error(msg || this.$t('auth.loginFailed'))
       } finally {
         this.loading = false

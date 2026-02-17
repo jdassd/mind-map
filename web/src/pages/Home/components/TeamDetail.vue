@@ -83,8 +83,9 @@ export default {
       try {
         await updateMemberRole(this.teamId, row.user_id, { role: row.role })
         this.$message.success(this.$t('home.roleUpdated'))
-      } catch {
-        this.$message.error(this.$t('home.updateFailed'))
+      } catch (err) {
+        const msg = err._friendlyMessage || (err.response && err.response.data && err.response.data.detail)
+        this.$message.error(msg || this.$t('home.updateFailed'))
         this.loadTeam()
       }
     },

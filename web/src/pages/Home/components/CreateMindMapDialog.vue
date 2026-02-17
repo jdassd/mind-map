@@ -53,7 +53,8 @@ export default {
         this.$emit('created')
         this.form.title = ''
       } catch (err) {
-        this.$message.error(this.$t('home.createFailed'))
+        const msg = err._friendlyMessage || (err.response && err.response.data && err.response.data.detail)
+        this.$message.error(msg || this.$t('home.createFailed'))
       } finally {
         this.loading = false
       }

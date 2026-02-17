@@ -51,8 +51,9 @@ export default {
         this.$message.success(this.$t('home.inviteSuccess'))
         this.$emit('invited')
         this.dialogVisible = false
-      } catch {
-        this.$message.error(this.$t('home.inviteFailed'))
+      } catch (err) {
+        const msg = err._friendlyMessage || (err.response && err.response.data && err.response.data.detail)
+        this.$message.error(msg || this.$t('home.inviteFailed'))
       } finally {
         this.loading = false
       }

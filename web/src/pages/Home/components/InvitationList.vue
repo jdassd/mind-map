@@ -34,16 +34,18 @@ export default {
         this.$message.success(this.$t('home.accepted'))
         this.$store.dispatch('team/fetchInvitations')
         this.$store.dispatch('team/fetchTeams')
-      } catch {
-        this.$message.error(this.$t('home.operationFailed'))
+      } catch (err) {
+        const msg = err._friendlyMessage || (err.response && err.response.data && err.response.data.detail)
+        this.$message.error(msg || this.$t('home.operationFailed'))
       }
     },
     async handleDecline(inv) {
       try {
         await declineInvitation(inv.id)
         this.$store.dispatch('team/fetchInvitations')
-      } catch {
-        this.$message.error(this.$t('home.operationFailed'))
+      } catch (err) {
+        const msg = err._friendlyMessage || (err.response && err.response.data && err.response.data.detail)
+        this.$message.error(msg || this.$t('home.operationFailed'))
       }
     }
   }
