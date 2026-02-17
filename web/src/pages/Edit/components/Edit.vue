@@ -107,7 +107,7 @@ import RichTextToolbar from './RichTextToolbar.vue'
 import NodeNoteContentShow from './NodeNoteContentShow.vue'
 import { getData, getConfig, storeData } from '@/api'
 import { getCurrentMindMapId } from '@/api'
-import { getNodeHistory, saveNodeHistory, getNodeLocks, lockNode, unlockNode, refreshNodeLock } from '@/api/mindmaps'
+import { getNodeHistory, saveNodeHistory, getNodeLocks, lockNode, unlockNode, refreshNodeLock, getMindMap } from '@/api/mindmaps'
 import Navigator from './Navigator.vue'
 import NodeImgPreview from './NodeImgPreview.vue'
 import SidebarTrigger from './SidebarTrigger.vue'
@@ -211,7 +211,9 @@ export default {
       lockRefreshTimer: null,  // 刷新自己锁定的TTL定时器
       // 编辑历史
       nodeHistoryMap: {},      // { nodeUid: historyRecord }
-      activeNodeHistory: null  // 当前选中节点的编辑历史
+      activeNodeHistory: null, // 当前选中节点的编辑历史
+      // 数据同步
+      lastSyncedAt: null       // 上次同步时的 updated_at
     }
   },
   computed: {
@@ -511,6 +513,8 @@ export default {
         })
       })
       this.bindSaveEvent()
+      // 监听库内部的编辑结束事件，用于解锁和保存历史
+      this.mindMap.on('hide_text_edit', this.onTextEditHidden)
       // 如果应用被接管，那么抛出事件传递思维导图实例
       if (window.takeOverApp) {
         this.$bus.$emit('app_inited', this.mindMap)
@@ -678,14 +682,15 @@ export default {
       }
     },
 
-    // 轮询获取锁定状态
+    // 轮询获取锁定状态 + 数据同步
     async pollLocks() {
       const mindmapId = getCurrentMindMapId()
       if (!mindmapId) return
       try {
         const { data } = await getNodeLocks(mindmapId)
+        const locks = data.locks || []
         const newLocks = {}
-        data.forEach(lock => {
+        locks.forEach(lock => {
           newLocks[lock.node_uid] = {
             user_id: lock.user_id,
             display_name: lock.display_name
@@ -693,8 +698,35 @@ export default {
         })
         this.lockedNodes = newLocks
         this.updateAllLockLabels()
+
+        // 数据同步：检查 updated_at 是否变化
+        const serverUpdatedAt = data.updated_at
+        if (serverUpdatedAt && this.lastSyncedAt && serverUpdatedAt !== this.lastSyncedAt) {
+          // 只在自己没有正在编辑时同步
+          if (!this.editingNodeUid) {
+            this.syncDataFromServer(mindmapId)
+          }
+        }
+        if (serverUpdatedAt) {
+          this.lastSyncedAt = serverUpdatedAt
+        }
       } catch (e) {
         // ignore polling errors
+      }
+    },
+
+    // 从服务端同步最新的思维导图数据
+    async syncDataFromServer(mindmapId) {
+      try {
+        const { data: mapData } = await getMindMap(mindmapId)
+        if (mapData && mapData.data) {
+          const fullData = mapData.data
+          if (fullData.root) {
+            this.mindMap.setFullData(fullData)
+          }
+        }
+      } catch (e) {
+        // ignore sync errors
       }
     },
 
@@ -759,35 +791,43 @@ export default {
       return false
     },
 
-    // 编辑结束时解锁节点并保存历史
+    // 编辑结束的 bus 事件处理（由工具栏等外部组件触发）
     handleEndTextEdit() {
+      // 只负责调用库的 endTextEdit，实际的解锁清理由 hide_text_edit 事件回调处理
       this.mindMap.renderer.endTextEdit()
-      if (this.editingNodeUid) {
-        const mindmapId = getCurrentMindMapId()
-        const editedNodeUid = this.editingNodeUid
-        // 停止TTL刷新
-        if (this.lockRefreshTimer) {
-          clearInterval(this.lockRefreshTimer)
-          this.lockRefreshTimer = null
-        }
-        this.editingNodeUid = null
-        // 立即从本地状态移除锁并清除标签，不等轮询
-        this.$delete(this.lockedNodes, editedNodeUid)
-        this.removeLockLabel(editedNodeUid)
-        // 解锁（异步）
-        if (mindmapId) {
-          unlockNode(mindmapId, editedNodeUid).catch(() => {})
-        }
-        // 保存编辑历史
-        const currentUser = this.$store.state.auth.user
-        if (currentUser && mindmapId) {
-          saveNodeHistory(mindmapId, {
-            node_uid: editedNodeUid,
-            user_display_name: currentUser.display_name
-          }).then(({ data }) => {
-            this.$set(this.nodeHistoryMap, editedNodeUid, data)
-          }).catch(() => {})
-        }
+    },
+
+    // 库内部编辑结束时触发（hide_text_edit 事件）—— 处理解锁和保存历史
+    onTextEditHidden() {
+      if (!this.editingNodeUid) return
+
+      const mindmapId = getCurrentMindMapId()
+      const editedNodeUid = this.editingNodeUid
+
+      // 停止TTL刷新
+      if (this.lockRefreshTimer) {
+        clearInterval(this.lockRefreshTimer)
+        this.lockRefreshTimer = null
+      }
+      this.editingNodeUid = null
+
+      // 解锁
+      if (mindmapId) {
+        unlockNode(mindmapId, editedNodeUid).then(() => {
+          // 解锁成功后立即刷新一次锁定状态
+          this.pollLocks()
+        }).catch(() => {})
+      }
+
+      // 保存编辑历史
+      const currentUser = this.$store.state.auth.user
+      if (currentUser && mindmapId) {
+        saveNodeHistory(mindmapId, {
+          node_uid: editedNodeUid,
+          user_display_name: currentUser.display_name
+        }).then(({ data }) => {
+          this.$set(this.nodeHistoryMap, editedNodeUid, data)
+        }).catch(() => {})
       }
     },
 
@@ -843,10 +883,11 @@ export default {
     updateAllLockLabels() {
       // 先清除所有旧标签
       this.clearAllLockLabels()
-      // 重新创建（跳过自己持有的锁）
+      // 重新创建
       const currentUser = this.$store.state.auth.user
       for (const [nodeUid, lockInfo] of Object.entries(this.lockedNodes)) {
-        if (currentUser && lockInfo.user_id === currentUser.id) continue
+        // 跳过自己正在编辑的节点（自己编辑时不需要看到标签）
+        if (currentUser && lockInfo.user_id === currentUser.id && this.editingNodeUid === nodeUid) continue
         this.updateLockLabel(nodeUid, lockInfo)
       }
     },

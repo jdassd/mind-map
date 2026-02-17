@@ -35,13 +35,13 @@ class LockRequest(BaseModel):
     node_uid: str
 
 
-@router.get("/{mindmap_id}/locks", response_model=list[LockResponse])
+@router.get("/{mindmap_id}/locks")
 async def get_locks(
     mindmap_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all current locks for a mindmap."""
+    """Get all current locks for a mindmap, plus the mindmap's updated_at for data sync."""
     result = await db.execute(select(MindMap).where(MindMap.id == mindmap_id))
     mindmap = result.scalar_one_or_none()
     if not mindmap:
@@ -60,11 +60,11 @@ async def get_locks(
         val = await r.get(_lock_key(mindmap_id, node_uid))
         if val:
             info = json.loads(val)
-            locks.append(LockResponse(
-                node_uid=node_uid,
-                user_id=info["user_id"],
-                display_name=info["display_name"],
-            ))
+            locks.append({
+                "node_uid": node_uid,
+                "user_id": info["user_id"],
+                "display_name": info["display_name"],
+            })
         else:
             expired.append(node_uid)
 
@@ -72,7 +72,10 @@ async def get_locks(
     if expired:
         await r.srem(index_key, *expired)
 
-    return locks
+    return {
+        "locks": locks,
+        "updated_at": mindmap.updated_at.isoformat() if mindmap.updated_at else None
+    }
 
 
 @router.post("/{mindmap_id}/locks")
