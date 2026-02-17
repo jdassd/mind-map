@@ -205,6 +205,7 @@ export default {
       // 节点锁定相关
       lockedNodes: {},         // { nodeUid: { user_id, display_name } }
       editingNodeUid: null,    // 当前正在编辑的节点uid
+      lockGranted: false,      // 锁定已授权标记，防止 beforeTextEdit 循环
       lockLabelElements: {},   // SVG lock label elements
       lockPollTimer: null,     // 轮询锁定状态定时器
       lockRefreshTimer: null,  // 刷新自己锁定的TTL定时器
@@ -714,6 +715,12 @@ export default {
 
     // 检查节点锁定状态（beforeTextEdit 回调）
     checkNodeLockBeforeEdit(node) {
+      // 锁定已授权，直接放行并清除标记
+      if (this.lockGranted) {
+        this.lockGranted = false
+        return true
+      }
+
       if (!node) return true
 
       const mindmapId = getCurrentMindMapId()
@@ -740,7 +747,8 @@ export default {
               refreshNodeLock(mindmapId, this.editingNodeUid).catch(() => {})
             }
           }, 30000)
-          // 锁定成功，触发编辑
+          // 设置授权标记，再次调用 startTextEdit 时 beforeTextEdit 会放行
+          this.lockGranted = true
           this.mindMap.renderer.startTextEdit()
         } else if (data.locked_by) {
           this.$message.warning(`${data.locked_by.display_name} 正在编辑此节点`)
@@ -762,11 +770,14 @@ export default {
           clearInterval(this.lockRefreshTimer)
           this.lockRefreshTimer = null
         }
-        // 解锁
+        this.editingNodeUid = null
+        // 立即从本地状态移除锁并清除标签，不等轮询
+        this.$delete(this.lockedNodes, editedNodeUid)
+        this.removeLockLabel(editedNodeUid)
+        // 解锁（异步）
         if (mindmapId) {
           unlockNode(mindmapId, editedNodeUid).catch(() => {})
         }
-        this.editingNodeUid = null
         // 保存编辑历史
         const currentUser = this.$store.state.auth.user
         if (currentUser && mindmapId) {
@@ -777,8 +788,6 @@ export default {
             this.$set(this.nodeHistoryMap, editedNodeUid, data)
           }).catch(() => {})
         }
-        // 立即刷新锁定状态
-        this.pollLocks()
       }
     },
 
@@ -834,8 +843,10 @@ export default {
     updateAllLockLabels() {
       // 先清除所有旧标签
       this.clearAllLockLabels()
-      // 重新创建
+      // 重新创建（跳过自己持有的锁）
+      const currentUser = this.$store.state.auth.user
       for (const [nodeUid, lockInfo] of Object.entries(this.lockedNodes)) {
+        if (currentUser && lockInfo.user_id === currentUser.id) continue
         this.updateLockLabel(nodeUid, lockInfo)
       }
     },
