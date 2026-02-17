@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.mind_map import MindMap
+from app.models.node_edit_history import NodeEditHistory
 from app.models.user import User
 from app.schemas.mind_map import MindMapCreate, MindMapUpdate, MindMapResponse, MindMapListItem
+from app.schemas.node_edit_history import NodeEditHistoryCreate, NodeEditHistoryResponse
 from app.services.mind_map import get_user_mindmaps, can_access_mindmap
 
 router = APIRouter(prefix="/api/mindmaps", tags=["mindmaps"])
@@ -93,3 +97,66 @@ async def delete_mindmap(
         raise HTTPException(status_code=403, detail="Only the owner can delete")
     await db.delete(mindmap)
     await db.commit()
+
+
+@router.get("/{mindmap_id}/node-history", response_model=list[NodeEditHistoryResponse])
+async def get_node_history(
+    mindmap_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(MindMap).where(MindMap.id == mindmap_id))
+    mindmap = result.scalar_one_or_none()
+    if not mindmap:
+        raise HTTPException(status_code=404, detail="Mind map not found")
+    role = await can_access_mindmap(db, current_user.id, mindmap)
+    if role is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+    result = await db.execute(
+        select(NodeEditHistory)
+        .where(NodeEditHistory.mindmap_id == mindmap_id)
+        .order_by(NodeEditHistory.edited_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+@router.post("/{mindmap_id}/node-history", response_model=NodeEditHistoryResponse, status_code=status.HTTP_201_CREATED)
+async def create_node_history(
+    mindmap_id: str,
+    body: NodeEditHistoryCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(MindMap).where(MindMap.id == mindmap_id))
+    mindmap = result.scalar_one_or_none()
+    if not mindmap:
+        raise HTTPException(status_code=404, detail="Mind map not found")
+    role = await can_access_mindmap(db, current_user.id, mindmap)
+    if role is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if role == "viewer":
+        raise HTTPException(status_code=403, detail="Viewers cannot edit")
+    # Upsert: update existing record for same mindmap+node, or create new one
+    existing_result = await db.execute(
+        select(NodeEditHistory).where(
+            NodeEditHistory.mindmap_id == mindmap_id,
+            NodeEditHistory.node_uid == body.node_uid
+        )
+    )
+    record = existing_result.scalar_one_or_none()
+    if record:
+        record.user_id = current_user.id
+        record.user_display_name = body.user_display_name
+        record.edited_at = datetime.now(timezone.utc)
+    else:
+        record = NodeEditHistory(
+            mindmap_id=mindmap_id,
+            node_uid=body.node_uid,
+            user_id=current_user.id,
+            user_display_name=body.user_display_name,
+            edited_at=datetime.now(timezone.utc),
+        )
+        db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record

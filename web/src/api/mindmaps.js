@@ -19,3 +19,11 @@ export function updateMindMap(id, data) {
 export function deleteMindMap(id) {
   return http.delete(`/mindmaps/${id}`)
 }
+
+export function getNodeHistory(mindmapId) {
+  return http.get(`/mindmaps/${mindmapId}/node-history`)
+}
+
+export function saveNodeHistory(mindmapId, data) {
+  return http.post(`/mindmaps/${mindmapId}/node-history`, data)
+}

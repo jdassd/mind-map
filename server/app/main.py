@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import create_tables
 from app.routers import auth, mindmaps, teams, invitations
+from app.routers import ws as ws_router
 
 # Pydantic 验证错误 → 用户友好提示的映射
 VALIDATION_FIELD_NAMES = {
@@ -65,6 +66,7 @@ app.include_router(auth.router)
 app.include_router(mindmaps.router)
 app.include_router(teams.router)
 app.include_router(invitations.router)
+app.include_router(ws_router.router)
 
 
 @app.get("/api/health")

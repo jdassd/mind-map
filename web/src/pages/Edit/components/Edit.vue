@@ -61,6 +61,10 @@
     >
       <div class="dragTip">{{ $t('edit.dragTip') }}</div>
     </div>
+    <!-- 节点编辑历史状态栏 -->
+    <div class="nodeEditStatusBar" v-if="activeNodeHistory">
+      <span>最后编辑：{{ activeNodeHistory.user_display_name }}，{{ formatTime(activeNodeHistory.edited_at) }}</span>
+    </div>
   </div>
 </template>
 
@@ -102,6 +106,9 @@ import Contextmenu from './Contextmenu.vue'
 import RichTextToolbar from './RichTextToolbar.vue'
 import NodeNoteContentShow from './NodeNoteContentShow.vue'
 import { getData, getConfig, storeData } from '@/api'
+import { getCurrentMindMapId } from '@/api'
+import { getNodeHistory, saveNodeHistory } from '@/api/mindmaps'
+import MindMapWS from '@/api/ws'
 import Navigator from './Navigator.vue'
 import NodeImgPreview from './NodeImgPreview.vue'
 import SidebarTrigger from './SidebarTrigger.vue'
@@ -195,7 +202,15 @@ export default {
       mindMapConfig: {},
       prevImg: '',
       storeConfigTimer: null,
-      showDragMask: false
+      showDragMask: false,
+      // 节点锁定相关
+      wsClient: null,
+      lockedNodes: {},       // { nodeUid: { user_id, display_name } }
+      editingNodeUid: null,  // 当前正在编辑的节点uid
+      lockLabelElements: {}, // SVG lock label elements
+      // 编辑历史
+      nodeHistoryMap: {},     // { nodeUid: historyRecord }
+      activeNodeHistory: null // 当前选中节点的编辑历史
     }
   },
   computed: {
@@ -244,6 +259,10 @@ export default {
     this.$bus.$on('localStorageExceeded', this.onLocalStorageExceeded)
     window.addEventListener('resize', this.handleResize)
     this.$bus.$on('showDownloadTip', this.showDownloadTip)
+    // 节点锁定和编辑历史
+    this.initWebSocket()
+    this.loadNodeHistory()
+    this.$bus.$on('node_active', this.handleNodeActive)
   },
   beforeDestroy() {
     this.$bus.$off('execCommand', this.execCommand)
@@ -259,6 +278,13 @@ export default {
     this.$bus.$off('localStorageExceeded', this.onLocalStorageExceeded)
     window.removeEventListener('resize', this.handleResize)
     this.$bus.$off('showDownloadTip', this.showDownloadTip)
+    this.$bus.$off('node_active', this.handleNodeActive)
+    // 清理WebSocket和锁定标签
+    if (this.wsClient) {
+      this.wsClient.close()
+      this.wsClient = null
+    }
+    this.clearAllLockLabels()
     this.mindMap.destroy()
   },
   methods: {
@@ -273,10 +299,6 @@ export default {
 
     handleStartTextEdit() {
       this.mindMap.renderer.startTextEdit()
-    },
-
-    handleEndTextEdit() {
-      this.mindMap.renderer.endTextEdit()
     },
 
     handleCreateLineFromActiveNode() {
@@ -303,6 +325,10 @@ export default {
         this.enableShowLoading = false
         hideLoading()
       }
+      // 重新渲染锁定标签
+      this.$nextTick(() => {
+        this.updateAllLockLabels()
+      })
     },
 
     // 获取思维导图数据，实际应该调接口获取
@@ -424,6 +450,9 @@ export default {
         },
         expandBtnNumHandler: num => {
           return num >= 100 ? '…' : num
+        },
+        beforeTextEdit: node => {
+          return this.checkNodeLockBeforeEdit(node)
         },
         beforeDeleteNodeImg: node => {
           return new Promise(resolve => {
@@ -626,6 +655,231 @@ export default {
       this.$bus.$emit('importFile', file)
     },
 
+    // ============ 节点锁定与编辑历史 ============
+
+    // 初始化WebSocket连接
+    initWebSocket() {
+      const mindmapId = getCurrentMindMapId()
+      if (!mindmapId || window.takeOverApp) return
+
+      this.wsClient = new MindMapWS(mindmapId)
+
+      this.wsClient.onLockStateSync = (locks) => {
+        this.lockedNodes = { ...locks }
+        this.updateAllLockLabels()
+      }
+
+      this.wsClient.onNodeLocked = (nodeUid, lockedBy) => {
+        this.$set(this.lockedNodes, nodeUid, lockedBy)
+        this.updateLockLabel(nodeUid, lockedBy)
+      }
+
+      this.wsClient.onNodeUnlocked = (nodeUid) => {
+        this.$delete(this.lockedNodes, nodeUid)
+        this.removeLockLabel(nodeUid)
+      }
+
+      this.wsClient.onLockSuccess = (nodeUid) => {
+        this.editingNodeUid = nodeUid
+        // 锁定成功，允许编辑 - 触发编辑
+        this.mindMap.renderer.startTextEdit()
+      }
+
+      this.wsClient.onLockFailed = (nodeUid, lockedBy) => {
+        this.$message.warning(`${lockedBy.display_name} 正在编辑此节点`)
+      }
+
+      this.wsClient.connect()
+    },
+
+    // 检查节点锁定状态（beforeTextEdit 回调）
+    checkNodeLockBeforeEdit(node) {
+      if (!this.wsClient || !node) return true
+
+      const nodeUid = node.uid || (node.nodeData && node.nodeData.data && node.nodeData.data.uid) || node.getData('uid')
+      if (!nodeUid) return true // 没有uid的节点不做锁定
+
+      // 检查是否被他人锁定
+      const lockInfo = this.lockedNodes[nodeUid]
+      const currentUser = this.$store.state.auth.user
+      if (lockInfo && currentUser && lockInfo.user_id !== currentUser.id) {
+        this.$message.warning(`${lockInfo.display_name} 正在编辑此节点`)
+        return false
+      }
+
+      // 请求锁定
+      this.wsClient.lockNode(nodeUid)
+      // 返回 false 先阻止编辑，等 onLockSuccess 回调后再启动编辑
+      return false
+    },
+
+    // 编辑结束时解锁节点并保存历史
+    handleEndTextEdit() {
+      this.mindMap.renderer.endTextEdit()
+      if (this.editingNodeUid && this.wsClient) {
+        this.wsClient.unlockNode(this.editingNodeUid)
+        // 保存编辑历史
+        const currentUser = this.$store.state.auth.user
+        const mindmapId = getCurrentMindMapId()
+        if (currentUser && mindmapId) {
+          saveNodeHistory(mindmapId, {
+            node_uid: this.editingNodeUid,
+            user_display_name: currentUser.display_name
+          }).then(({ data }) => {
+            this.$set(this.nodeHistoryMap, this.editingNodeUid, data)
+            this.editingNodeUid = null
+          }).catch(() => {
+            this.editingNodeUid = null
+          })
+        } else {
+          this.editingNodeUid = null
+        }
+      }
+    },
+
+    // 加载节点编辑历史
+    async loadNodeHistory() {
+      const mindmapId = getCurrentMindMapId()
+      if (!mindmapId || window.takeOverApp) return
+      try {
+        const { data } = await getNodeHistory(mindmapId)
+        const map = {}
+        data.forEach(record => {
+          // 只保留每个节点最新的一条记录
+          if (!map[record.node_uid] || new Date(record.edited_at) > new Date(map[record.node_uid].edited_at)) {
+            map[record.node_uid] = record
+          }
+        })
+        this.nodeHistoryMap = map
+      } catch (e) {
+        // ignore
+      }
+    },
+
+    // 处理节点激活事件 - 显示编辑历史
+    handleNodeActive(node) {
+      if (!node || (Array.isArray(node) && node.length === 0)) {
+        this.activeNodeHistory = null
+        return
+      }
+      const activeNode = Array.isArray(node) ? node[0] : node
+      if (!activeNode) {
+        this.activeNodeHistory = null
+        return
+      }
+      const nodeUid = activeNode.uid || (activeNode.nodeData && activeNode.nodeData.data && activeNode.nodeData.data.uid) || (activeNode.getData && activeNode.getData('uid'))
+      if (nodeUid && this.nodeHistoryMap[nodeUid]) {
+        this.activeNodeHistory = this.nodeHistoryMap[nodeUid]
+      } else {
+        this.activeNodeHistory = null
+      }
+    },
+
+    // 格式化时间
+    formatTime(timeStr) {
+      if (!timeStr) return ''
+      const d = new Date(timeStr)
+      const pad = n => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+    },
+
+    // ============ 锁定标签 SVG 覆盖层 ============
+
+    // 更新所有锁定标签
+    updateAllLockLabels() {
+      // 先清除所有旧标签
+      this.clearAllLockLabels()
+      // 重新创建
+      for (const [nodeUid, lockInfo] of Object.entries(this.lockedNodes)) {
+        this.updateLockLabel(nodeUid, lockInfo)
+      }
+    },
+
+    // 为单个节点创建/更新锁定标签
+    updateLockLabel(nodeUid, lockInfo) {
+      this.removeLockLabel(nodeUid)
+      if (!this.mindMap) return
+
+      // 遍历节点找到匹配的
+      const node = this.findNodeByUid(nodeUid)
+      if (!node) return
+
+      const group = node.group
+      if (!group) return
+
+      // 获取节点位置信息
+      const { left, top, width } = node
+      // 创建锁定标签
+      const labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+      labelGroup.setAttribute('class', 'node-lock-label')
+
+      // 背景矩形
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+      const text = `${lockInfo.display_name} 编辑中`
+      const textWidth = text.length * 12 + 16
+      rect.setAttribute('x', '0')
+      rect.setAttribute('y', '-24')
+      rect.setAttribute('rx', '4')
+      rect.setAttribute('ry', '4')
+      rect.setAttribute('width', String(textWidth))
+      rect.setAttribute('height', '20')
+      rect.setAttribute('fill', '#ff9800')
+      rect.setAttribute('opacity', '0.9')
+
+      // 文本
+      const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+      textEl.setAttribute('x', '8')
+      textEl.setAttribute('y', '-10')
+      textEl.setAttribute('fill', '#fff')
+      textEl.setAttribute('font-size', '12')
+      textEl.textContent = text
+
+      labelGroup.appendChild(rect)
+      labelGroup.appendChild(textEl)
+
+      // 添加到节点的 group 中
+      group.node.appendChild(labelGroup)
+
+      this.lockLabelElements[nodeUid] = labelGroup
+    },
+
+    // 移除单个锁定标签
+    removeLockLabel(nodeUid) {
+      const el = this.lockLabelElements[nodeUid]
+      if (el && el.parentNode) {
+        el.parentNode.removeChild(el)
+      }
+      delete this.lockLabelElements[nodeUid]
+    },
+
+    // 清除所有锁定标签
+    clearAllLockLabels() {
+      for (const uid of Object.keys(this.lockLabelElements)) {
+        this.removeLockLabel(uid)
+      }
+    },
+
+    // 通过uid查找节点实例
+    findNodeByUid(uid) {
+      if (!this.mindMap || !this.mindMap.renderer) return null
+      // 遍历渲染器中的所有节点
+      const root = this.mindMap.renderer.root
+      if (!root) return null
+      return this._searchNode(root, uid)
+    },
+
+    _searchNode(node, uid) {
+      const nodeUid = node.uid || (node.nodeData && node.nodeData.data && node.nodeData.data.uid) || (node.getData && node.getData('uid'))
+      if (nodeUid === uid) return node
+      if (node.children) {
+        for (const child of node.children) {
+          const found = this._searchNode(child, uid)
+          if (found) return found
+        }
+      }
+      return null
+    },
+
     showDownloadTip(title, desc) {
       const h = this.$createElement
       this.$msgbox({
@@ -711,6 +965,20 @@ export default {
     top: 0px;
     width: 100%;
     height: 100%;
+  }
+
+  .nodeEditStatusBar {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    padding: 4px 16px;
+    border-radius: 4px 4px 0 0;
+    font-size: 12px;
+    z-index: 1000;
+    white-space: nowrap;
   }
 }
 </style>
