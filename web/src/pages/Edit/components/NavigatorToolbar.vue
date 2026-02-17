@@ -104,23 +104,10 @@
             <span class="iconfont iconAIshengcheng"></span>
             {{ $t('navigatorToolbar.ai') }}
           </el-dropdown-item>
-          <el-dropdown-item command="client">
-            <span class="iconfont iconxiazai"></span>
-            {{ $t('navigatorToolbar.downloadClient') }}
-          </el-dropdown-item>
           <el-dropdown-item command="github">
             <span class="iconfont icongithub"></span>
             Github
           </el-dropdown-item>
-          <el-dropdown-item command="site">
-            <span class="iconfont iconwangzhan"></span>
-            {{ $t('navigatorToolbar.site') }}
-          </el-dropdown-item>
-          <el-dropdown-item disabled
-            >{{ $t('navigatorToolbar.current') }}v{{
-              version
-            }}</el-dropdown-item
-          >
         </el-dropdown-menu>
       </el-dropdown>
     </div>
@@ -209,18 +196,11 @@ export default {
       } else if (command === 'aiChat') {
         this.setActiveSidebar('ai')
         return
-      } else if (command === 'client') {
-        this.$bus.$emit(
-          'showDownloadTip',
-          this.$t('navigatorToolbar.downloadClient'),
-          this.$t('navigatorToolbar.downloadDesc')
-        )
-        return
       }
       let url = ''
       switch (command) {
         case 'github':
-          url = 'https://github.com/wanglin2/mind-map'
+          url = 'https://github.com/jdassd/mind-map'
           break
         case 'helpDoc':
           url = 'https://wanglin2.github.io/mind-map-docs/help/help1.html'
@@ -233,7 +213,7 @@ export default {
           url = 'https://wanglin2.github.io/mind-map-docs/'
           break
         case 'issue':
-          url = 'https://github.com/wanglin2/mind-map/issues/new'
+          url = 'https://github.com/jdassd/mind-map/issues/new'
           break
 
         default:
