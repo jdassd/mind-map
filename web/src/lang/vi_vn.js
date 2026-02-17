@@ -499,8 +499,7 @@ export default {
     stoppedGenerating: 'Đã dừng tạo',
     AIConfiguration: 'Cấu hình AI',
     VolcanoArkLargeModelConfiguration: 'Cấu hình mô hình lớn Volcano Ark:',
-    configTip:
-      'Hiện tại, chỉ hỗ trợ mô hình Volcano Ark, và bạn cần tự mình lấy khóa. Để biết các bước thực hiện chi tiết, vui lòng tham khảo:',
+    configTip: 'Hiện tại, chỉ hỗ trợ mô hình Volcano Ark, và bạn cần tự mình lấy khóa.',
     course: 'Khóa học',
     inferenceAccessPoint: 'Điểm truy cập suy luận',
     mindMappingClientConfiguration: 'Cấu hình ứng dụng khách sơ đồ tư duy:',

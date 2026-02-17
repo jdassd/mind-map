@@ -502,7 +502,7 @@ export default {
     AIConfiguration: 'AI configuration',
     VolcanoArkLargeModelConfiguration: 'Volcano Ark Large Model Configuration:',
     configTip:
-      'At present, only the Volcano Ark model is supported, and you need to obtain the key yourself. For detailed operation steps, please refer to:',
+      'At present, only the Volcano Ark model is supported, and you need to obtain the key yourself.',
     course: 'Course',
     inferenceAccessPoint: 'Inference access point',
     mindMappingClientConfiguration: 'Mind mapping client configuration:',

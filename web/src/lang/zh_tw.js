@@ -483,7 +483,7 @@ export default {
     stoppedGenerating: '已停止生成',
     AIConfiguration: 'AI配置',
     VolcanoArkLargeModelConfiguration: '火山方舟大模型配置：',
-    configTip: '目前僅支持火山方舟大模型，需要自行去獲取key，詳細操作步驟見：',
+    configTip: '目前僅支持火山方舟大模型，需要自行去獲取key。',
     course: '教程',
     inferenceAccessPoint: '推理接入點',
     mindMappingClientConfiguration: '思緒思維導圖客戶端配置：',
