@@ -778,6 +778,17 @@ export default {
       lockNode(mindmapId, nodeUid).then(({ data }) => {
         if (data.success) {
           this.editingNodeUid = nodeUid
+          // 立即更新本地锁定状态并显示标签
+          const currentUser = this.$store.state.auth.user
+          if (currentUser) {
+            this.$set(this.lockedNodes, nodeUid, {
+              user_id: currentUser.id,
+              display_name: currentUser.display_name
+            })
+            this.$nextTick(() => {
+              this.updateLockLabel(nodeUid, this.lockedNodes[nodeUid])
+            })
+          }
           // 启动TTL刷新定时器（每30秒刷新一次）
           this.lockRefreshTimer = setInterval(() => {
             if (this.editingNodeUid) {
@@ -889,10 +900,7 @@ export default {
       // 先清除所有旧标签
       this.clearAllLockLabels()
       // 重新创建
-      const currentUser = this.$store.state.auth.user
       for (const [nodeUid, lockInfo] of Object.entries(this.lockedNodes)) {
-        // 跳过自己正在编辑的节点（自己编辑时不需要看到标签）
-        if (currentUser && lockInfo.user_id === currentUser.id && this.editingNodeUid === nodeUid) continue
         this.updateLockLabel(nodeUid, lockInfo)
       }
     },
