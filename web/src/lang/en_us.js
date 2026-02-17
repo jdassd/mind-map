@@ -566,7 +566,8 @@ export default {
     passwordMismatch: 'Passwords do not match',
     loginFailed: 'Login failed',
     registerSuccess: 'Registration successful, please login',
-    registerFailed: 'Registration failed'
+    registerFailed: 'Registration failed',
+    emailInvalid: 'Please enter a valid email address'
   },
   home: {
     myMindMaps: 'My Mind Maps',

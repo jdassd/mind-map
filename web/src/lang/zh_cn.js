@@ -546,7 +546,8 @@ export default {
     passwordMismatch: '两次密码不一致',
     loginFailed: '登录失败',
     registerSuccess: '注册成功，请登录',
-    registerFailed: '注册失败'
+    registerFailed: '注册失败',
+    emailInvalid: '请输入有效的邮箱地址'
   },
   home: {
     myMindMaps: '我的导图',
