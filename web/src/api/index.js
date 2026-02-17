@@ -13,6 +13,41 @@ let mindMapData = null
 let currentMindMapId = null
 let saveTimer = null
 
+// 获取默认的思维导图数据结构
+export const getDefaultMindMapData = () => {
+  return {
+    root: {
+      data: {
+        text: '根节点'
+      },
+      children: []
+    },
+    theme: {
+      template: 'classic4',
+      config: {}
+    },
+    layout: 'logicalStructure'
+  }
+}
+
+// 确保思维导图数据结构完整
+const ensureCompleteData = data => {
+  if (!data || typeof data !== 'object') {
+    return simpleDeepClone(exampleData)
+  }
+  const defaults = getDefaultMindMapData()
+  if (!data.root) {
+    data.root = defaults.root
+  }
+  if (!data.theme) {
+    data.theme = defaults.theme
+  }
+  if (!data.layout) {
+    data.layout = defaults.layout
+  }
+  return data
+}
+
 // 获取缓存的思维导图数据
 export const getData = () => {
   // 接管模式
@@ -29,7 +64,7 @@ export const getData = () => {
     return simpleDeepClone(exampleData)
   } else {
     try {
-      return JSON.parse(store)
+      return ensureCompleteData(JSON.parse(store))
     } catch (error) {
       return simpleDeepClone(exampleData)
     }

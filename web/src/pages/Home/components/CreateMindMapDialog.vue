@@ -15,6 +15,7 @@
 <script>
 import { createMindMap } from '@/api/mindmaps'
 import { createTeamMindMap } from '@/api/teams'
+import { getDefaultMindMapData } from '@/api'
 
 export default {
   name: 'CreateMindMapDialog',
@@ -44,7 +45,9 @@ export default {
       } catch { return }
       this.loading = true
       try {
-        const payload = { title: this.form.title, data: {}, config: {} }
+        const defaultData = getDefaultMindMapData()
+        defaultData.root.data.text = this.form.title
+        const payload = { title: this.form.title, data: defaultData, config: {} }
         if (this.teamId) {
           await createTeamMindMap(this.teamId, payload)
         } else {
