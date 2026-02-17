@@ -7,17 +7,17 @@
 [![GitHub stars](https://img.shields.io/github/stars/wanglin2/mind-map)](https://github.com/wanglin2/mind-map/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/wanglin2/mind-map)](https://github.com/wanglin2/mind-map/network/members)
 
-> 中文名：思绪思维导图。一个简单&强大的 Web 思维导图库和思维导图软件。
+> 中文名：Jdassd思维导图。一个简单&强大的 Web 思维导图库和思维导图软件。
 
 # 客户端和插件
 
-- 思绪思维导图客户端
+- Jdassd思维导图客户端
 
 支持Windows、Mac及Linux系统。下载地址：[Github](https://github.com/wanglin2/mind-map/releases)、[百度网盘](https://pan.baidu.com/s/1C8phEJ5pagAAa-o1tU42Uw?pwd=jqfb)、[夸克网盘](https://pan.quark.cn/s/2733982f1976)
 
 > 如果在macOS上安装后无法打开，报错**不受信任**或者**移到垃圾箱**，执行下面命令后再启动即可：
 > ``` shell
-> sudo xattr -d com.apple.quarantine /Applications/思绪思维导图.app
+> sudo xattr -d com.apple.quarantine /Applications/Jdassd思维导图.app
 > ```
 
 - Obsidian插件
