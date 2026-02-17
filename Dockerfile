@@ -6,7 +6,7 @@ RUN cd web && npm install --legacy-peer-deps
 COPY web/ ./web/
 COPY simple-mind-map/ ./simple-mind-map/
 COPY copy.js ./
-RUN cd web && NODE_OPTIONS=--openssl-legacy-provider npm run build
+RUN cd web && npm run build
 
 # Stage 2: Runtime
 FROM python:3.11-slim
@@ -35,7 +35,6 @@ RUN mkdir -p /app/data
 WORKDIR /app/server
 
 ENV DATA_DIR=/app/data
-ENV JWT_SECRET=change-me-in-production
 
 EXPOSE 8080
 VOLUME /app/data
