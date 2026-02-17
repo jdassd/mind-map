@@ -5,7 +5,7 @@
         <i class="el-icon-connection"></i>
       </div>
       <div class="card-info">
-        <h4 class="card-title">{{ item.title || 'Untitled' }}</h4>
+        <h4 class="card-title">{{ getTextFromHtml(item.title) || 'Untitled' }}</h4>
         <span class="card-time">{{ formatTime(item.updated_at) }}</span>
       </div>
     </div>
@@ -24,12 +24,15 @@
 </template>
 
 <script>
+import { getTextFromHtml } from '@/utils'
+
 export default {
   name: 'MindMapCard',
   props: {
     item: { type: Object, required: true }
   },
   methods: {
+    getTextFromHtml,
     handleCommand(cmd) {
       this.$emit(cmd)
     },

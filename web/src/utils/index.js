@@ -93,3 +93,10 @@ export const getParentWithClass = (el, className) => {
   }
   return null
 }
+
+// 提取html字符串里的纯文本
+export const getTextFromHtml = html => {
+  let el = document.createElement('div')
+  el.innerHTML = html
+  return el.textContent
+}

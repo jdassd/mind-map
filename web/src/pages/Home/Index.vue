@@ -46,6 +46,7 @@ import CreateMindMapDialog from './components/CreateMindMapDialog.vue'
 import TeamCreateDialog from './components/TeamCreateDialog.vue'
 import TeamDetail from './components/TeamDetail.vue'
 import InvitationList from './components/InvitationList.vue'
+import { getTextFromHtml } from '@/utils'
 
 export default {
   name: 'Home',
@@ -72,7 +73,7 @@ export default {
     filteredList() {
       if (!this.searchText) return this.list
       const s = this.searchText.toLowerCase()
-      return this.list.filter(item => item.title.toLowerCase().includes(s))
+      return this.list.filter(item => getTextFromHtml(item.title).toLowerCase().includes(s))
     },
     teamName() {
       const t = this.teams.find(t => t.id === this.activeTeamId)
