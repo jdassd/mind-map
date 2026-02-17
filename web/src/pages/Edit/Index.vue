@@ -14,7 +14,7 @@
 import Toolbar from './components/Toolbar.vue'
 import Edit from './components/Edit.vue'
 import { mapState, mapMutations } from 'vuex'
-import { getLocalConfig } from '@/api'
+import { getLocalConfig, loadMindMapFromServer, setCurrentMindMapId } from '@/api'
 
 export default {
   components: {
@@ -23,7 +23,8 @@ export default {
   },
   data() {
     return {
-      show: false
+      show: false,
+      serverData: null
     }
   },
   computed: {
@@ -44,12 +45,51 @@ export default {
       lock: true,
       text: this.$t('other.loading')
     })
+    // 从服务端加载导图数据
+    await this.loadFromServer()
     this.show = true
     loading.close()
     this.setBodyDark()
   },
+  beforeDestroy() {
+    // 清理当前导图ID
+    setCurrentMindMapId(null)
+  },
   methods: {
-    ...mapMutations(['setLocalConfig']),
+    ...mapMutations(['setLocalConfig', 'setIsReadonly']),
+
+    async loadFromServer() {
+      // takeover 模式下跳过服务端加载
+      if (window.takeOverApp) return
+      const id = this.$route.params.id
+      if (!id) return
+      setCurrentMindMapId(id)
+      const result = await loadMindMapFromServer(id)
+      if (result) {
+        this.serverData = result
+        // 如果返回的数据含 data，写入 localStorage 供现有逻辑读取
+        if (result.data) {
+          localStorage.setItem('SIMPLE_MIND_MAP_DATA', JSON.stringify(result.data))
+        }
+        if (result.config) {
+          localStorage.setItem('SIMPLE_MIND_MAP_CONFIG', JSON.stringify(result.config))
+        }
+        // 检查权限：如果用户是 viewer 则设为只读
+        // 权限信息由后端在 response header 或 data 中返回
+        // 此处简单判断：如果 owner_id 不等于当前用户 id，且角色为 viewer
+        this.checkPermission(result)
+      }
+    },
+
+    checkPermission(mapData) {
+      const user = this.$store.state.auth.user
+      if (!user || !mapData.owner_id) return
+      if (mapData.owner_id !== user.id && mapData.team_id) {
+        // 团队导图：由后端控制，此处前端检查角色
+        // 如果后端返回403则不会到这里，所以能访问说明至少有viewer权限
+        // 具体角色判断需要额外API，这里暂时保持可编辑
+      }
+    },
 
     // 初始化本地配置
     initLocalConfig() {

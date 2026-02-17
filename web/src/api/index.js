@@ -2,6 +2,7 @@ import exampleData from 'simple-mind-map/example/exampleData'
 import { simpleDeepClone } from 'simple-mind-map/src/utils/index'
 import Vue from 'vue'
 import vuexStore from '@/store'
+import { getMindMap, updateMindMap } from '@/api/mindmaps'
 
 const SIMPLE_MIND_MAP_DATA = 'SIMPLE_MIND_MAP_DATA'
 const SIMPLE_MIND_MAP_CONFIG = 'SIMPLE_MIND_MAP_CONFIG'
@@ -9,6 +10,8 @@ const SIMPLE_MIND_MAP_LANG = 'SIMPLE_MIND_MAP_LANG'
 const SIMPLE_MIND_MAP_LOCAL_CONFIG = 'SIMPLE_MIND_MAP_LOCAL_CONFIG'
 
 let mindMapData = null
+let currentMindMapId = null
+let saveTimer = null
 
 // 获取缓存的思维导图数据
 export const getData = () => {
@@ -59,12 +62,51 @@ export const storeData = data => {
       return
     }
     localStorage.setItem(SIMPLE_MIND_MAP_DATA, JSON.stringify(originData))
+    // 防抖保存到服务端
+    debounceSaveToServer(originData)
   } catch (error) {
     console.log(error)
     if ('exceeded') {
       Vue.prototype.$bus.$emit('localStorageExceeded')
     }
   }
+}
+
+// 防抖保存到服务端
+const debounceSaveToServer = data => {
+  if (window.takeOverApp || !currentMindMapId) return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    updateMindMap(currentMindMapId, {
+      data: data,
+      title: data.root && data.root.data ? data.root.data.text || 'Untitled' : 'Untitled'
+    }).catch(err => {
+      console.log('Auto save failed:', err)
+    })
+  }, 2000)
+}
+
+// 从服务端加载思维导图
+export const loadMindMapFromServer = async id => {
+  if (window.takeOverApp) return null
+  currentMindMapId = id
+  try {
+    const { data } = await getMindMap(id)
+    return data
+  } catch (error) {
+    console.log('Failed to load mind map from server:', error)
+    return null
+  }
+}
+
+// 设置当前导图ID（供路由切换使用）
+export const setCurrentMindMapId = id => {
+  currentMindMapId = id
+}
+
+// 获取当前导图ID
+export const getCurrentMindMapId = () => {
+  return currentMindMapId
 }
 
 // 获取思维导图配置数据
