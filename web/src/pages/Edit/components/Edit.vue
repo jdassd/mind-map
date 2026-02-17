@@ -267,6 +267,9 @@ export default {
     this.initLockPolling()
     this.loadNodeHistory()
     this.$bus.$on('node_active', this.handleNodeActive)
+    // 缩放/平移时更新标签位置
+    this.$bus.$on('scale', this.updateAllLockLabels)
+    this.$bus.$on('translate', this.updateAllLockLabels)
   },
   beforeDestroy() {
     this.$bus.$off('execCommand', this.execCommand)
@@ -283,6 +286,8 @@ export default {
     window.removeEventListener('resize', this.handleResize)
     this.$bus.$off('showDownloadTip', this.showDownloadTip)
     this.$bus.$off('node_active', this.handleNodeActive)
+    this.$bus.$off('scale', this.updateAllLockLabels)
+    this.$bus.$off('translate', this.updateAllLockLabels)
     // 清理轮询定时器和锁定标签
     this.stopLockPolling()
     this.releaseCurrentLock()
@@ -778,15 +783,12 @@ export default {
       lockNode(mindmapId, nodeUid).then(({ data }) => {
         if (data.success) {
           this.editingNodeUid = nodeUid
-          // 立即更新本地锁定状态并显示标签
+          // 立即更新本地锁定状态
           const currentUser = this.$store.state.auth.user
           if (currentUser) {
             this.$set(this.lockedNodes, nodeUid, {
               user_id: currentUser.id,
               display_name: currentUser.display_name
-            })
-            this.$nextTick(() => {
-              this.updateLockLabel(nodeUid, this.lockedNodes[nodeUid])
             })
           }
           // 启动TTL刷新定时器（每30秒刷新一次）
@@ -798,6 +800,10 @@ export default {
           // 设置授权标记，再次调用 startTextEdit 时 beforeTextEdit 会放行
           this.lockGranted = true
           this.mindMap.renderer.startTextEdit()
+          // startTextEdit 后再显示标签，确保节点位置已确定
+          this.$nextTick(() => {
+            this.updateLockLabel(nodeUid, this.lockedNodes[nodeUid])
+          })
         } else if (data.locked_by) {
           this.$message.warning(`${data.locked_by.display_name} 正在编辑此节点`)
         }
@@ -893,7 +899,7 @@ export default {
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
     },
 
-    // ============ 锁定标签 SVG 覆盖层 ============
+    // ============ 锁定标签 HTML 覆盖层 ============
 
     // 更新所有锁定标签
     updateAllLockLabels() {
@@ -905,52 +911,42 @@ export default {
       }
     },
 
-    // 为单个节点创建/更新锁定标签
+    // 为单个节点创建/更新锁定标签（HTML overlay，不受SVG重绘影响）
     updateLockLabel(nodeUid, lockInfo) {
       this.removeLockLabel(nodeUid)
-      if (!this.mindMap) return
+      if (!this.mindMap || !this.$refs.mindMapContainer) return
 
-      // 遍历节点找到匹配的
+      // 查找节点
       const node = this.findNodeByUid(nodeUid)
-      if (!node) return
+      if (!node || !node.group || !node.group.node) return
 
-      const group = node.group
-      if (!group) return
+      // 用 getBoundingClientRect 获取节点在屏幕上的实际位置
+      const nodeRect = node.group.node.getBoundingClientRect()
+      const containerRect = this.$refs.mindMapContainer.getBoundingClientRect()
 
-      // 获取节点位置信息
-      const { left, top, width } = node
-      // 创建锁定标签
-      const labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
-      labelGroup.setAttribute('class', 'node-lock-label')
-
-      // 背景矩形
-      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+      // 创建 HTML overlay div
+      const label = document.createElement('div')
+      label.className = 'node-lock-label-overlay'
       const text = `${lockInfo.display_name} 编辑中`
-      const textWidth = text.length * 12 + 16
-      rect.setAttribute('x', '0')
-      rect.setAttribute('y', '-24')
-      rect.setAttribute('rx', '4')
-      rect.setAttribute('ry', '4')
-      rect.setAttribute('width', String(textWidth))
-      rect.setAttribute('height', '20')
-      rect.setAttribute('fill', '#ff9800')
-      rect.setAttribute('opacity', '0.9')
+      label.textContent = text
+      label.style.cssText = `
+        position: absolute;
+        left: ${nodeRect.left - containerRect.left}px;
+        top: ${nodeRect.top - containerRect.top - 24}px;
+        background: #ff9800;
+        color: #fff;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        white-space: nowrap;
+        z-index: 999;
+        pointer-events: none;
+        opacity: 0.9;
+        line-height: 18px;
+      `
 
-      // 文本
-      const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-      textEl.setAttribute('x', '8')
-      textEl.setAttribute('y', '-10')
-      textEl.setAttribute('fill', '#fff')
-      textEl.setAttribute('font-size', '12')
-      textEl.textContent = text
-
-      labelGroup.appendChild(rect)
-      labelGroup.appendChild(textEl)
-
-      // 添加到节点的 group 中
-      group.node.appendChild(labelGroup)
-
-      this.lockLabelElements[nodeUid] = labelGroup
+      this.$refs.mindMapContainer.appendChild(label)
+      this.lockLabelElements[nodeUid] = label
     },
 
     // 移除单个锁定标签
